@@ -7,6 +7,7 @@ import com.karfield.graphql.annotations.EnableGraphQL;
 import com.karfield.graphql.annotations.GraphQLMutation;
 import com.karfield.graphql.annotations.GraphQLQuery;
 import com.karfield.graphql.annotations.GraphQLScalar;
+import com.karfield.graphql.servlet.components.GraphQLController;
 import graphql.GraphQL;
 import graphql.schema.Coercing;
 import graphql.schema.DataFetcher;
@@ -17,6 +18,7 @@ import graphql.schema.idl.SchemaGenerator;
 import graphql.schema.idl.SchemaParser;
 import graphql.schema.idl.TypeDefinitionRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
@@ -32,8 +34,8 @@ import java.util.List;
 import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring;
 
 @Configuration
-//@ConditionalOnWebApplication
-@ComponentScan(basePackageClasses = {DataFetcher.class, Coercing.class})
+@ConditionalOnWebApplication
+@ComponentScan(basePackageClasses = {DataFetcher.class, Coercing.class, GraphQLController.class})
 public class GraphQLAutoConfiguration {
 
     @Autowired
