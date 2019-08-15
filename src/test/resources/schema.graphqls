@@ -1,8 +1,0 @@
-
-type Query {
-    a: A
-}
-
-type A {
-    f1: String
-}

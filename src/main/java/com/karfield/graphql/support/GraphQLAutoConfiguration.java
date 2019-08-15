@@ -3,16 +3,10 @@ package com.karfield.graphql.support;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
 import com.google.common.io.Resources;
-import com.karfield.graphql.annotations.EnableGraphQL;
-import com.karfield.graphql.annotations.GraphQLMutation;
-import com.karfield.graphql.annotations.GraphQLQuery;
-import com.karfield.graphql.annotations.GraphQLScalar;
+import com.karfield.graphql.annotations.*;
 import com.karfield.graphql.servlet.components.GraphQLController;
 import graphql.GraphQL;
-import graphql.schema.Coercing;
-import graphql.schema.DataFetcher;
-import graphql.schema.GraphQLScalarType;
-import graphql.schema.GraphQLSchema;
+import graphql.schema.*;
 import graphql.schema.idl.RuntimeWiring;
 import graphql.schema.idl.SchemaGenerator;
 import graphql.schema.idl.SchemaParser;
@@ -51,8 +45,31 @@ public class GraphQLAutoConfiguration {
     @PostConstruct
     public void init() throws IOException {
         EnableGraphQL config = getGraphQLConfig();
+        if (config == null) {
+            return;
+        }
+
         URL url = Resources.getResource(config.schema());
         String sdl = Resources.toString(url, Charsets.UTF_8);
+
+        List<String> others = Lists.newArrayList("common.graphql");
+        config.modules();
+        for (String m: config.modules()) {
+            if (!m.equals("common.graphql")) {
+                others.add(m);
+            }
+        }
+        for (String m: others) {
+            try {
+                url = Resources.getResource(m);
+                String s = Resources.toString(url, Charsets.UTF_8);
+                sdl += "\n";
+                sdl += s;
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+        }
+
         GraphQLSchema graphQLSchema = buildSchema(sdl);
         this.graphQL = GraphQL.newGraphQL(graphQLSchema).build();
     }
@@ -94,6 +111,20 @@ public class GraphQLAutoConfiguration {
                     name = "Mutation";
                 }
                 builder = builder.type(newTypeWiring(name).dataFetcher(mutation.ann.field(), (DataFetcher) mutation.instance));
+            }
+        }
+
+        List<WiringPair<GraphQLInterface>> interfaces = scanWirings(GraphQLInterface.class);
+        for (WiringPair<GraphQLInterface> intf: interfaces) {
+            if (intf.instance instanceof TypeResolver) {
+                builder = builder.type(newTypeWiring(intf.ann.value()).typeResolver((TypeResolver) intf.instance));
+            }
+        }
+
+        List<WiringPair<GraphQLUnion>> unions = scanWirings(GraphQLUnion.class);
+        for (WiringPair<GraphQLUnion> union: unions) {
+            if (union.instance instanceof TypeResolver) {
+                builder = builder.type(newTypeWiring(union.ann.value()).typeResolver((TypeResolver) union.instance));
             }
         }
 
