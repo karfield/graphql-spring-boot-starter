@@ -9,6 +9,6 @@ import java.util.concurrent.CompletableFuture;
 @PublicApi
 public interface GraphQLInvocation {
 
-    CompletableFuture<ExecutionResult> invoke(GraphQLInvocationData invocationData, WebRequest webRequest);
+    CompletableFuture<ExecutionResult> invoke(GraphQLInvocationData invocationData, WebRequest webRequest, Object context);
 
 }

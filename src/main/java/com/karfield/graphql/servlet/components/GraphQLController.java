@@ -1,5 +1,7 @@
 package com.karfield.graphql.servlet.components;
 
+import com.google.common.base.CaseFormat;
+import com.google.common.collect.Maps;
 import com.karfield.graphql.servlet.ExecutionResultHandler;
 import com.karfield.graphql.servlet.GraphQLInvocation;
 import com.karfield.graphql.servlet.GraphQLInvocationData;
@@ -16,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -36,7 +39,7 @@ public class GraphQLController {
             method = RequestMethod.POST,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public Object graphqlPOST(
-            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+            @RequestHeader HttpHeaders httpHeaders,
             @RequestParam(value = "query", required = false) String query,
             @RequestParam(value = "operationName", required = false) String operationName,
             @RequestParam(value = "variables", required = false) String variablesJson,
@@ -46,6 +49,8 @@ public class GraphQLController {
         if (body == null) {
             body = "";
         }
+
+        MediaType contentType = httpHeaders.getContentType();
 
         // https://graphql.org/learn/serving-over-http/#post-request
         //
@@ -58,12 +63,12 @@ public class GraphQLController {
         //   "variables": { "myVariable": "someValue", ... }
         // }
 
-        if (MediaType.APPLICATION_JSON_VALUE.equals(contentType)) {
+        if (MediaType.APPLICATION_JSON.equals(contentType)) {
             GraphQLRequestBody request = jsonSerializer.deserialize(body, GraphQLRequestBody.class);
             if (request.getQuery() == null) {
                 request.setQuery("");
             }
-            return executeRequest(request.getQuery(), request.getOperationName(), request.getVariables(), webRequest);
+            return executeRequest(request.getQuery(), request.getOperationName(), request.getVariables(), webRequest, httpHeaders);
         }
 
         // In addition to the above, we recommend supporting two additional cases:
@@ -72,14 +77,14 @@ public class GraphQLController {
         //   it should be parsed and handled in the same way as the HTTP GET case.
 
         if (query != null) {
-            return executeRequest(query, operationName, convertVariablesJson(variablesJson), webRequest);
+            return executeRequest(query, operationName, convertVariablesJson(variablesJson), webRequest, httpHeaders);
         }
 
         // * If the "application/graphql" Content-Type header is present,
         //   treat the HTTP POST body contents as the GraphQL query string.
 
         if ("application/graphql".equals(contentType)) {
-            return executeRequest(body, null, null, webRequest);
+            return executeRequest(body, null, null, webRequest, httpHeaders);
         }
 
         throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Could not process GraphQL request");
@@ -89,6 +94,7 @@ public class GraphQLController {
             method = RequestMethod.GET,
             produces = MediaType.APPLICATION_JSON_VALUE)
     public Object graphqlGET(
+            @RequestHeader HttpHeaders httpHeaders,
             @RequestParam("query") String query,
             @RequestParam(value = "operationName", required = false) String operationName,
             @RequestParam(value = "variables", required = false) String variablesJson,
@@ -113,7 +119,7 @@ public class GraphQLController {
         // If the query contains several named operations,
         // an "operationName" query parameter can be used to control which one should be executed.
 
-        return executeRequest(query, operationName, convertVariablesJson(variablesJson), webRequest);
+        return executeRequest(query, operationName, convertVariablesJson(variablesJson), webRequest, httpHeaders);
     }
 
     private Map<String, Object> convertVariablesJson(String jsonMap) {
@@ -123,13 +129,30 @@ public class GraphQLController {
         return jsonSerializer.deserialize(jsonMap, Map.class);
     }
 
+    @Autowired
+    private String passXHeader;
+
     private Object executeRequest(
             String query,
             String operationName,
             Map<String, Object> variables,
-            WebRequest webRequest) {
+            WebRequest webRequest,
+            HttpHeaders httpHeaders
+            ) {
+        HashMap<String, Object> xHeaders = Maps.newHashMap();
+        if (!passXHeader.equals("")) {
+            Map<String, String> headers = httpHeaders.toSingleValueMap();
+            headers.forEach((k, v) -> {
+                k = k.toLowerCase();
+                if (k.startsWith(passXHeader)) {
+                    // user defined headers, we pass it as a variables
+//                    k = CaseFormat.LOWER_HYPHEN.to(CaseFormat.LOWER_CAMEL, k);
+                    xHeaders.put(k, v);
+                }
+            });
+        }
         GraphQLInvocationData invocationData = new GraphQLInvocationData(query, operationName, variables);
-        CompletableFuture<ExecutionResult> executionResult = graphQLInvocation.invoke(invocationData, webRequest);
+        CompletableFuture<ExecutionResult> executionResult = graphQLInvocation.invoke(invocationData, webRequest, xHeaders);
         return executionResultHandler.handleExecutionResult(executionResult);
     }
 

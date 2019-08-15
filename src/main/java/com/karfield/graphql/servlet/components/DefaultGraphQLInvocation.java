@@ -7,6 +7,7 @@ import graphql.ExecutionInput;
 import graphql.ExecutionResult;
 import graphql.GraphQL;
 import graphql.Internal;
+import graphql.execution.ExecutionContextBuilder;
 import org.dataloader.DataLoaderRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -28,11 +29,12 @@ public class DefaultGraphQLInvocation implements GraphQLInvocation {
     ExecutionInputCustomizer executionInputCustomizer;
 
     @Override
-    public CompletableFuture<ExecutionResult> invoke(GraphQLInvocationData invocationData, WebRequest webRequest) {
+    public CompletableFuture<ExecutionResult> invoke(GraphQLInvocationData invocationData, WebRequest webRequest, Object context) {
         ExecutionInput.Builder executionInputBuilder = ExecutionInput.newExecutionInput()
                 .query(invocationData.getQuery())
                 .operationName(invocationData.getOperationName())
-                .variables(invocationData.getVariables());
+                .variables(invocationData.getVariables())
+                .context(context);
         if (dataLoaderRegistry != null) {
             executionInputBuilder.dataLoaderRegistry(dataLoaderRegistry);
         }

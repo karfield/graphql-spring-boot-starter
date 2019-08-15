@@ -42,11 +42,23 @@ public class GraphQLAutoConfiguration {
         return graphQL;
     }
 
+    private String passXHeader = "";
+
+    @Bean
+    public String passXHeader() {
+        return passXHeader;
+    }
+
     @PostConstruct
     public void init() throws IOException {
         EnableGraphQL config = getGraphQLConfig();
         if (config == null) {
             return;
+        }
+
+        String headerPrefix = config.xHeaderPrefix().toLowerCase();
+        if (headerPrefix.startsWith("x-")) {
+            passXHeader = headerPrefix;
         }
 
         URL url = Resources.getResource(config.schema());
