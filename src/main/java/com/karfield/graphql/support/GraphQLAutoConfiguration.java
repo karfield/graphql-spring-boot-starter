@@ -3,6 +3,7 @@ package com.karfield.graphql.support;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
 import com.google.common.io.Resources;
+import com.karfield.graphql.annotations.GraphQLArgument;
 import com.karfield.graphql.annotations.*;
 import com.karfield.graphql.servlet.components.GraphQLController;
 import graphql.GraphQL;
@@ -21,9 +22,13 @@ import org.springframework.context.annotation.Configuration;
 import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Parameter;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static graphql.schema.idl.TypeRuntimeWiring.newTypeWiring;
 
@@ -107,22 +112,14 @@ public class GraphQLAutoConfiguration {
         List<WiringPair<GraphQLQuery>> queries = scanWirings(GraphQLQuery.class);
         for (WiringPair<GraphQLQuery> query: queries) {
             if (query.instance instanceof DataFetcher) {
-                String name = query.ann.type();
-                if (name.equals("")) {
-                    name = "Query";
-                }
-                builder = builder.type(newTypeWiring(name).dataFetcher(query.ann.field(), (DataFetcher) query.instance));
+                builder = wireQuery(builder, query.ann.type(), query.ann.field(), (DataFetcher) query.instance);
             }
         }
 
         List<WiringPair<GraphQLMutation>> mutations = scanWirings(GraphQLMutation.class);
         for (WiringPair<GraphQLMutation> mutation: mutations) {
             if (mutation.instance instanceof DataFetcher) {
-                String name = mutation.ann.type();
-                if (name.equals("")) {
-                    name = "Mutation";
-                }
-                builder = builder.type(newTypeWiring(name).dataFetcher(mutation.ann.field(), (DataFetcher) mutation.instance));
+                builder = wireMutation(builder, mutation.ann.type(), mutation.ann.field(), (DataFetcher) mutation.instance);
             }
         }
 
@@ -140,7 +137,27 @@ public class GraphQLAutoConfiguration {
             }
         }
 
+        List<WiringPair<GraphQLResolver>> resolvers = scanWirings(GraphQLResolver.class);
+        for (WiringPair<GraphQLResolver> resolver: resolvers) {
+            builder = registerResolver(builder, resolver.instance);
+        }
+
         return builder.build();
+    }
+
+    private RuntimeWiring.Builder wireType(RuntimeWiring.Builder builder, String name, String defaultName, String field, DataFetcher instance) {
+        if (name.equals("")) {
+            name = defaultName;
+        }
+        return builder.type(newTypeWiring(name).dataFetcher(field, instance));
+    }
+
+    private RuntimeWiring.Builder wireQuery(RuntimeWiring.Builder builder, String name, String field, DataFetcher instance) {
+        return wireType(builder, name, "Query", field, instance);
+    }
+
+    private RuntimeWiring.Builder wireMutation(RuntimeWiring.Builder builder, String name, String field, DataFetcher instance) {
+        return wireType(builder, name, "Mutation", field, instance);
     }
 
     private EnableGraphQL getGraphQLConfig() {
@@ -170,5 +187,122 @@ public class GraphQLAutoConfiguration {
             results.add(new WiringPair<T>(obj, a));
         }
         return results;
+    }
+
+    private RuntimeWiring.Builder registerResolver(RuntimeWiring.Builder builder, Object resolver) {
+        for (Method method: resolver.getClass().getDeclaredMethods()) {
+            if (!Modifier.isPublic(method.getModifiers())) {
+                continue;
+            }
+            GraphQLQuery query = method.getAnnotation(GraphQLQuery.class);
+            if (query != null) {
+                builder = wireQuery(builder, query.type(), query.field(), dataFetchingEnvironment ->
+                        method.invoke(resolver, buildInvokeParameters(dataFetchingEnvironment, method.getParameters())));
+                continue;
+            }
+
+            GraphQLMutation mutation = method.getAnnotation(GraphQLMutation.class);
+            if (mutation != null) {
+                builder = wireQuery(builder, mutation.type(), mutation.field(), dataFetchingEnvironment ->
+                        method.invoke(resolver, buildInvokeParameters(dataFetchingEnvironment, method.getParameters())));
+            }
+        }
+        return builder;
+    }
+
+    private Object[] buildInvokeParameters(DataFetchingEnvironment dataFetchingEnvironment, Parameter[] parameters) {
+        List<Object> arguments = Lists.newArrayList();
+        for (Parameter p : parameters) {
+            if (p.getAnnotations().length > 0) {
+                GraphQLArgument arg = p.getAnnotation(GraphQLArgument.class);
+                if (arg != null) {
+                    String name = arg.name();
+                    if (name.equals("")) {
+                        name = arg.value();
+                    }
+                    Object a = dataFetchingEnvironment.getArgument(name);
+                    arguments.add(a);
+                    continue;
+                }
+
+                GraphQLContext ctx = p.getAnnotation(GraphQLContext.class);
+                if (ctx != null) {
+                    Object context = dataFetchingEnvironment.getContext();
+                    if (ctx.key().equals("")) {
+                        arguments.add(context);
+                    } else if (context instanceof Map) {
+                        arguments.add(((Map) context).get(ctx.key()));
+                    }
+                    continue;
+                }
+
+                GraphQLRequireAnyOfFields fr = p.getAnnotation(GraphQLRequireAnyOfFields.class);
+                if (fr != null) {
+                    if (p.getClass().equals(Boolean.class) || p.getClass().equals(boolean.class)) {
+                        if (fr.value().length == 0) {
+                            arguments.add(true);
+                            continue;
+                        }
+                        String glob = fr.value()[0];
+                        boolean result;
+                        if (fr.value().length > 1) {
+                            ArrayList<String> anyOf = Lists.newArrayList(fr.value());
+                            String[] others = (String[]) anyOf.subList(1, anyOf.size() - 1).toArray();
+                            result = dataFetchingEnvironment.getSelectionSet().containsAnyOf(glob, others);
+                        } else {
+                            result = dataFetchingEnvironment.getSelectionSet().containsAnyOf(glob);
+                        }
+                        arguments.add(result);
+                        continue;
+                    } else {
+                        throw new RuntimeException("@GraphQLRequireAnyOfFields only can be used on boolean parameter");
+                    }
+                }
+
+                GraphQLRequireAnyOfFields ar = p.getAnnotation(GraphQLRequireAnyOfFields.class);
+                if (ar != null) {
+                    if (p.getClass().equals(Boolean.class) || p.getClass().equals(boolean.class)) {
+                        if (ar.value().length == 0) {
+                            arguments.add(false);
+                            continue;
+                        }
+                        String glob = ar.value()[0];
+                        boolean result;
+                        if (ar.value().length > 1) {
+                            ArrayList<String> allOf = Lists.newArrayList(ar.value());
+                            String[] others = (String[]) allOf.subList(1, allOf.size() - 1).toArray();
+                            result = dataFetchingEnvironment.getSelectionSet().containsAllOf(glob, others);
+                        } else {
+                            result = dataFetchingEnvironment.getSelectionSet().containsAllOf(glob);
+                        }
+                        arguments.add(result);
+                    } else {
+                        throw new RuntimeException("@GraphQLRequireAllOfFields only can be used on boolean parameter");
+                    }
+                }
+
+                GraphQLPath path = p.getAnnotation(GraphQLPath.class);
+                if (path != null) {
+                    if (p.getClass().equals(String.class)) {
+                        String pth = dataFetchingEnvironment.getExecutionStepInfo().getPath().toString();
+                        arguments.add(pth);
+                        continue;
+                    } else {
+                        throw new RuntimeException("@GraphQLPath only can be used on String parameter");
+                    }
+                }
+
+                // unknown parameter
+                throw new RuntimeException("unknown argument");
+            } else {
+                if (p.getType().equals(DataFetchingEnvironment.class)) {
+                    arguments.add(dataFetchingEnvironment);
+                    continue;
+                } else {
+                    throw new RuntimeException("unknown type of argument without annotation, recommend to use DataFetchingEnvironment as a parameter");
+                }
+            }
+        }
+        return arguments.toArray();
     }
 }
