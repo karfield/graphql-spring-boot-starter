@@ -5,6 +5,7 @@ import java.lang.annotation.*;
 @Target({ElementType.PARAMETER})
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
+@Inherited
 public @interface GraphQLRequireAnyOfFields {
     /**
      * This will return true if the field selection set matches any of the specified "glob" pattern matches ie
@@ -14,5 +15,5 @@ public @interface GraphQLRequireAnyOfFields {
      * match an invoice field with child fields that start with 'customer'.
      *
      */
-    String[] value() default "";
+    String[] value() default {};
 }

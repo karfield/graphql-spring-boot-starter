@@ -7,6 +7,6 @@ import java.lang.annotation.*;
 @Documented
 public @interface EnableGraphQL {
     String schema() default "schema.graphqls";
-    String[] modules() default "";
+    String[] modules() default {};
     String xHeaderPrefix() default ""; // do not pass X-* headers
 }
